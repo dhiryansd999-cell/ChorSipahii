@@ -1,47 +1,172 @@
-import React, { useState, useEffect } from 'react';
-import { 
-    Eye, 
-    EyeOff, 
-    Users, 
-    Play, 
-    RotateCcw, 
-    LogOut, 
-    Crown, 
-    ShieldAlert, 
-    User, 
-    Swords
-} from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { 
-    getAuth, 
-    signInAnonymously, 
-    signInWithCustomToken, 
-    onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-    getFirestore, 
-    collection, 
-    doc, 
-    setDoc, 
-    getDoc, 
-    updateDoc, 
-    onSnapshot 
-} from 'firebase/firestore';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chor Sipahi Multiplayer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .perspective-1000 { perspective: 1000px; }
+        .transform-style-3d { transform-style: preserve-3d; }
+        .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+        .rotate-y-180 { transform: rotateY(180deg); }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up { animation: fadeInUp 0.4s ease-out forwards; }
+        @keyframes pulseOnce {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+            50% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(74, 222, 128, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+        }
+        .animate-pulse-once { animation: pulseOnce 0.6s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-orange-100 to-yellow-200 min-h-screen font-sans text-stone-800 flex flex-col">
 
-// --- Firebase Setup ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    <!-- Loading Screen -->
+    <div id="screen-loading" class="flex-1 flex items-center justify-center">
+        <div class="animate-pulse text-2xl font-extrabold text-orange-600 flex items-center gap-3">
+            <svg class="w-8 h-8 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            Loading Game Engine...
+        </div>
+    </div>
 
-export default function App() {
-    const [user, setUser] = useState(null);
-    const [authLoading, setAuthLoading] = useState(true);
-    const [authError, setAuthError] = useState(null);
+    <!-- Home / Join Screen -->
+    <div id="screen-home" class="hidden flex-1 flex flex-col items-center justify-center p-4">
+        <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-orange-100">
+            <div class="bg-gradient-to-r from-orange-500 to-red-500 p-8 text-center">
+                <h1 class="text-4xl font-black text-white tracking-tight flex items-center justify-center gap-3 drop-shadow-md">
+                    <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                    Chor Sipahi
+                </h1>
+                <p class="text-orange-100 mt-3 font-medium tracking-wide text-sm uppercase">Raja • Mantri • Chor • Sipahi</p>
+            </div>
+            
+            <div class="p-8">
+                <div id="home-error" class="hidden mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-bold flex items-center gap-2">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span id="home-error-text"></span>
+                </div>
+                
+                <form id="join-form" class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-extrabold text-stone-700 mb-2 uppercase tracking-wide">Your Name</label>
+                        <input type="text" id="input-name" maxlength="15" placeholder="e.g. Rahul" required
+                            class="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-2xl focus:ring-4 focus:ring-orange-500/20 focus:border-orange-500 focus:bg-white transition-all outline-none font-bold text-lg text-stone-800 placeholder-stone-400" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-extrabold text-stone-700 mb-2 uppercase tracking-wide">Room Code</label>
+                        <input type="text" id="input-code" maxlength="8" placeholder="e.g. FUN123" required
+                            class="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-2xl uppercase focus:ring-4 focus:ring-orange-500/20 focus:border-orange-500 focus:bg-white transition-all outline-none font-black text-lg text-stone-800 placeholder-stone-400 tracking-widest" />
+                        <p class="text-xs font-bold text-stone-400 mt-3 text-center">Create a new code or enter a friend's code.</p>
+                    </div>
+                    
+                    <button type="submit" id="btn-join" class="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-black text-lg py-4 px-6 rounded-2xl transition-all shadow-xl hover:shadow-orange-500/30 active:scale-95 transform flex justify-center items-center gap-2">
+                        <span>Join / Create Room</span>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
 
-    // 1. Initialize Authentication (Required before Firestore)
-    useEffect(() => {
+    <!-- Active Room Screen -->
+    <div id="screen-room" class="hidden flex-1 flex flex-col bg-stone-100 max-w-3xl mx-auto w-full shadow-2xl relative">
+        <!-- Header -->
+        <header class="bg-white border-b border-stone-200 px-6 py-4 flex items-center justify-between shadow-sm sticky top-0 z-20">
+            <div class="flex items-center gap-4">
+                <button id="btn-leave" class="p-2.5 bg-stone-100 text-stone-500 hover:bg-red-50 hover:text-red-600 rounded-xl transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                </button>
+                <div>
+                    <h2 id="header-room-id" class="font-black text-stone-800 text-lg tracking-tight">Room: ...</h2>
+                    <p id="header-player-count" class="text-xs font-bold text-stone-500 uppercase tracking-wider">0 Player(s)</p>
+                </div>
+            </div>
+            <div id="header-actions">
+                <!-- Start/Restart buttons injected here -->
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 p-6 flex flex-col space-y-6 overflow-y-auto">
+            <!-- Dynamic Gameplay/Lobby Area -->
+            <div id="dynamic-area" class="flex-1 flex flex-col justify-center min-h-[300px]">
+                <!-- Injected content -->
+            </div>
+
+            <!-- Players List -->
+            <div class="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden mt-auto flex-shrink-0">
+                <div class="bg-stone-50 px-6 py-4 border-b border-stone-200 flex justify-between items-center">
+                    <h3 class="font-black text-stone-800 uppercase tracking-wide text-sm">Players</h3>
+                    <span id="player-count-badge" class="text-xs font-black bg-stone-200 text-stone-600 px-3 py-1 rounded-full">0</span>
+                </div>
+                <ul id="players-list" class="divide-y divide-stone-100">
+                    <!-- Players injected here -->
+                </ul>
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase Initialization ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- State ---
+        let user = null;
+        let currentRoomId = null;
+        let currentRoomData = null;
+        let unsubscribeRoom = null;
+        let hasPeeked = false;
+
+        // --- DOM Elements ---
+        const screens = {
+            loading: document.getElementById('screen-loading'),
+            home: document.getElementById('screen-home'),
+            room: document.getElementById('screen-room')
+        };
+        const el = {
+            joinForm: document.getElementById('join-form'),
+            inputName: document.getElementById('input-name'),
+            inputCode: document.getElementById('input-code'),
+            homeError: document.getElementById('home-error'),
+            homeErrorText: document.getElementById('home-error-text'),
+            btnJoin: document.getElementById('btn-join'),
+            headerRoomId: document.getElementById('header-room-id'),
+            headerPlayerCount: document.getElementById('header-player-count'),
+            headerActions: document.getElementById('header-actions'),
+            dynamicArea: document.getElementById('dynamic-area'),
+            playersList: document.getElementById('players-list'),
+            playerCountBadge: document.getElementById('player-count-badge'),
+            btnLeave: document.getElementById('btn-leave')
+        };
+
+        // --- Utils ---
+        const showScreen = (screenName) => {
+            Object.values(screens).forEach(s => s.classList.add('hidden'));
+            screens[screenName].classList.remove('hidden');
+        };
+
+        const showError = (msg) => {
+            if (!msg) {
+                el.homeError.classList.add('hidden');
+                return;
+            }
+            el.homeErrorText.textContent = msg;
+            el.homeError.classList.remove('hidden');
+        };
+
+        // --- Auth (Rule 3) ---
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -51,418 +176,287 @@ export default function App() {
                 }
             } catch (err) {
                 console.error("Auth Error:", err);
-                setAuthError(err.message);
-            } finally {
-                setAuthLoading(false);
+                showError("Failed to connect to game servers.");
+                showScreen('home');
             }
         };
 
+        onAuthStateChanged(auth, (currentUser) => {
+            user = currentUser;
+            if (user) {
+                if (!currentRoomId) showScreen('home');
+            }
+        });
+
         initAuth();
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            setUser(currentUser);
-        });
 
-        return () => unsubscribe();
-    }, []);
+        // --- Home Logic ---
+        el.joinForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!user) return;
+            showError('');
+            
+            const name = el.inputName.value.trim();
+            const code = el.inputCode.value.trim().toUpperCase();
+            
+            if (!name || !code) return;
+            
+            el.btnJoin.disabled = true;
+            el.btnJoin.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Joining...';
 
-    if (authLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-orange-50 text-orange-800 font-sans">
-                <div className="animate-pulse text-xl font-bold">Loading Game Engine...</div>
-            </div>
-        );
-    }
+            try {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', code);
+                const roomSnap = await getDoc(roomRef);
 
-    if (authError) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-red-50 text-red-800 p-4">
-                <div className="max-w-md w-full bg-white p-6 rounded-xl shadow-lg border border-red-200">
-                    <h2 className="text-xl font-bold mb-2">Authentication Error</h2>
-                    <p className="text-sm">{authError}</p>
-                </div>
-            </div>
-        );
-    }
-
-    return <GameManager user={user} />;
-}
-
-// --- Main Game Manager ---
-function GameManager({ user }) {
-    const [playerName, setPlayerName] = useState('');
-    const [roomCode, setRoomCode] = useState('');
-    const [currentRoom, setCurrentRoom] = useState(null);
-    const [roomData, setRoomData] = useState(null);
-    const [errorMsg, setErrorMsg] = useState('');
-
-    // Listen to Room Data
-    useEffect(() => {
-        if (!user || !currentRoom) return;
-        
-        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoom);
-        
-        const unsubscribe = onSnapshot(roomRef, (snapshot) => {
-            if (snapshot.exists()) {
-                setRoomData(snapshot.data());
-            } else {
-                setErrorMsg("Room was closed or does not exist.");
-                setCurrentRoom(null);
-            }
-        }, (error) => {
-            console.error("Snapshot error:", error);
-            setErrorMsg("Lost connection to the room.");
-        });
-
-        return () => unsubscribe();
-    }, [user, currentRoom]);
-
-    const handleJoinCreateRoom = async (e) => {
-        e.preventDefault();
-        setErrorMsg('');
-        const code = roomCode.trim().toUpperCase();
-        const name = playerName.trim();
-
-        if (!code || !name) {
-            setErrorMsg("Please enter both Name and Room Code.");
-            return;
-        }
-
-        try {
-            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', code);
-            const roomSnap = await getDoc(roomRef);
-
-            if (!roomSnap.exists()) {
-                // Create new room
-                await setDoc(roomRef, {
-                    id: code,
-                    host: user.uid,
-                    status: 'lobby',
-                    players: {
-                        [user.uid]: { name: name, role: '', revealedToAll: false }
+                if (!roomSnap.exists()) {
+                    // Create
+                    await setDoc(roomRef, {
+                        id: code,
+                        host: user.uid,
+                        status: 'lobby',
+                        players: {
+                            [user.uid]: { name, role: '', revealedToAll: false }
+                        }
+                    });
+                } else {
+                    // Join
+                    const data = roomSnap.data();
+                    if (data.status !== 'lobby' && (!data.players[user.uid])) {
+                        throw new Error("Game is already in progress!");
                     }
-                });
-            } else {
-                // Join existing room
-                const data = roomSnap.data();
-                if (data.status !== 'lobby') {
-                    setErrorMsg("Game is already in progress. Wait for them to finish the round!");
-                    return;
+                    await updateDoc(roomRef, {
+                        [`players.${user.uid}`]: { name, role: '', revealedToAll: false }
+                    });
                 }
                 
-                await updateDoc(roomRef, {
-                    [`players.${user.uid}`]: { name: name, role: '', revealedToAll: false }
-                });
+                currentRoomId = code;
+                hasPeeked = false; // Reset peek state on join
+                listenToRoom(code);
+                showScreen('room');
+            } catch (err) {
+                showError(err.message || "Failed to join room.");
+            } finally {
+                el.btnJoin.disabled = false;
+                el.btnJoin.innerHTML = '<span>Join / Create Room</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>';
             }
-            setCurrentRoom(code);
-        } catch (err) {
-            console.error(err);
-            setErrorMsg("Failed to join room. Please try again.");
-        }
-    };
+        });
 
-    const leaveRoom = async () => {
-        if (!currentRoom || !user || !roomData) return;
-        // Optional: Remove user from room data to clean up. For simplicity, just unsetting local state.
-        setCurrentRoom(null);
-        setRoomData(null);
-        setRoomCode('');
-    };
-
-    // --- RENDER ---
-    if (!currentRoom || !roomData) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-orange-100 to-yellow-200 flex flex-col items-center justify-center p-4 font-sans">
-                <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
-                    <div className="bg-orange-600 p-6 text-center">
-                        <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2">
-                            <Swords size={32} />
-                            Chor Sipahi
-                        </h1>
-                        <p className="text-orange-200 mt-2 text-sm">Raja • Mantri • Chor • Sipahi</p>
-                    </div>
+        // --- Room Logic ---
+        const listenToRoom = (roomId) => {
+            if (unsubscribeRoom) unsubscribeRoom();
+            
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
+            unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const prevStatus = currentRoomData?.status;
+                    currentRoomData = snapshot.data();
                     
-                    <div className="p-8">
-                        {errorMsg && (
-                            <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm font-medium">
-                                {errorMsg}
-                            </div>
-                        )}
+                    // Reset peek if round restarted
+                    if (prevStatus === 'playing' && currentRoomData.status === 'lobby') {
+                        hasPeeked = false;
+                    }
+                    
+                    renderRoom();
+                } else {
+                    leaveRoom("Room was closed.");
+                }
+            }, (error) => {
+                console.error("Room listener error", error);
+                leaveRoom("Lost connection to room.");
+            });
+        };
+
+        const renderRoom = () => {
+            if (!currentRoomData || !user) return;
+
+            const isHost = currentRoomData.host === user.uid;
+            const players = Object.entries(currentRoomData.players || {}).map(([uid, data]) => ({ uid, ...data }));
+            const me = currentRoomData.players[user.uid];
+
+            // Update Header
+            el.headerRoomId.textContent = `Room: ${currentRoomId}`;
+            el.headerPlayerCount.textContent = `${players.length} Player(s)`;
+            el.playerCountBadge.textContent = players.length;
+
+            // Render Header Actions
+            el.headerActions.innerHTML = '';
+            if (isHost && currentRoomData.status === 'lobby') {
+                const startBtn = document.createElement('button');
+                startBtn.className = `bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2 px-4 rounded-xl flex items-center gap-2 transition-colors shadow-sm ${players.length < 2 ? 'opacity-50 cursor-not-allowed' : ''}`;
+                startBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 00-1.555-.832z"></path></svg> Start Game`;
+                if (players.length >= 2) startBtn.onclick = startGame;
+                el.headerActions.appendChild(startBtn);
+            } else if (isHost && currentRoomData.status === 'playing') {
+                const restartBtn = document.createElement('button');
+                restartBtn.className = `bg-stone-600 hover:bg-stone-700 text-white text-sm font-bold py-2 px-4 rounded-xl flex items-center gap-2 transition-colors shadow-sm`;
+                restartBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> New Round`;
+                restartBtn.onclick = restartGame;
+                el.headerActions.appendChild(restartBtn);
+            }
+
+            // Render Dynamic Area
+            if (currentRoomData.status === 'lobby') {
+                el.dynamicArea.innerHTML = `
+                    <div class="bg-white p-8 rounded-3xl shadow-sm border border-stone-200 text-center flex-1 flex flex-col justify-center items-center">
+                        <svg class="w-16 h-16 text-stone-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                        <h3 class="text-2xl font-extrabold text-stone-800 mb-2">Waiting in Lobby</h3>
+                        <p class="text-stone-500 mb-6 font-medium">Share the room code <strong class="text-stone-800 bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-200">${currentRoomId}</strong> with friends.</p>
+                        ${isHost 
+                            ? '<p class="text-sm text-orange-700 font-bold bg-orange-100 border border-orange-200 px-5 py-2.5 rounded-xl shadow-sm">You are the host. Start when ready!</p>'
+                            : '<p class="text-sm text-blue-700 font-bold bg-blue-100 border border-blue-200 px-5 py-2.5 rounded-xl shadow-sm">Waiting for host to start...</p>'}
+                    </div>
+                `;
+            } else if (currentRoomData.status === 'playing' && me && me.role) {
+                const roleEmoji = me.role.includes('👑') ? '👑' : me.role.includes('👨‍⚖️') ? '👨‍⚖️' : me.role.includes('🦹‍♂️') ? '🦹‍♂️' : me.role.includes('👮') ? '👮' : '🧑‍🌾';
+                const roleName = me.role.split(' ')[0];
+                const isFlipped = hasPeeked || me.revealedToAll;
+
+                el.dynamicArea.innerHTML = `
+                    <div class="flex-1 flex flex-col items-center justify-center py-8">
+                        <h3 class="text-sm font-black text-stone-400 mb-8 uppercase tracking-widest bg-stone-200 px-4 py-1.5 rounded-full shadow-inner">Your Chit</h3>
                         
-                        <form onSubmit={handleJoinCreateRoom} className="space-y-5">
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Your Name</label>
-                                <input 
-                                    type="text" 
-                                    maxLength={15}
-                                    placeholder="e.g. Rahul, Aisha" 
-                                    value={playerName}
-                                    onChange={(e) => setPlayerName(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Room Code</label>
-                                <input 
-                                    type="text" 
-                                    maxLength={8}
-                                    placeholder="e.g. FUN123" 
-                                    value={roomCode}
-                                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl uppercase focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all outline-none"
-                                />
-                                <p className="text-xs text-gray-500 mt-2">Enter any code to create a room or join a friend's room.</p>
-                            </div>
-                            
-                            <button 
-                                type="submit" 
-                                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl transition-colors shadow-md active:scale-95 transform"
-                            >
-                                Join / Create Room
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <RoomView 
-            user={user} 
-            roomId={currentRoom} 
-            roomData={roomData} 
-            onLeave={leaveRoom} 
-        />
-    );
-}
-
-// --- Active Room Component ---
-function RoomView({ user, roomId, roomData, onLeave }) {
-    const isHost = roomData.host === user.uid;
-    const playersList = Object.entries(roomData.players || {}).map(([uid, data]) => ({ uid, ...data }));
-    const me = roomData.players[user.uid];
-
-    const startGame = async () => {
-        const uids = Object.keys(roomData.players);
-        
-        // Define base roles
-        let rolesPool = ['Raja 👑', 'Mantri 👨‍⚖️', 'Chor 🦹‍♂️', 'Sipahi 👮'];
-        
-        // Adjust pool based on number of players
-        if (uids.length < 4) {
-             rolesPool = rolesPool.slice(0, uids.length);
-        } else if (uids.length > 4) {
-            while (rolesPool.length < uids.length) {
-                rolesPool.push('Praja 🧑‍🌾'); // Citizen
-            }
-        }
-
-        // Shuffle roles
-        for (let i = rolesPool.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [rolesPool[i], rolesPool[j]] = [rolesPool[j], rolesPool[i]];
-        }
-
-        const updatedPlayers = { ...roomData.players };
-        uids.forEach((uid, index) => {
-            updatedPlayers[uid].role = rolesPool[index];
-            updatedPlayers[uid].revealedToAll = false;
-        });
-
-        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
-        await updateDoc(roomRef, {
-            status: 'playing',
-            players: updatedPlayers
-        });
-    };
-
-    const returnToLobby = async () => {
-        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
-        await updateDoc(roomRef, {
-            status: 'lobby'
-        });
-    };
-
-    return (
-        <div className="min-h-screen bg-stone-100 flex flex-col font-sans">
-            {/* Header */}
-            <header className="bg-white border-b border-stone-200 px-4 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10">
-                <div className="flex items-center gap-3">
-                    <button onClick={onLeave} className="p-2 text-stone-500 hover:bg-stone-100 rounded-full transition-colors">
-                        <LogOut size={20} />
-                    </button>
-                    <div>
-                        <h2 className="font-bold text-stone-800 leading-tight">Room: {roomId}</h2>
-                        <p className="text-xs text-stone-500">{playersList.length} Player(s)</p>
-                    </div>
-                </div>
-                {isHost && roomData.status === 'lobby' && (
-                    <button 
-                        onClick={startGame}
-                        disabled={playersList.length < 2}
-                        className="bg-green-600 hover:bg-green-700 disabled:bg-stone-300 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-sm"
-                    >
-                        <Play size={16} /> Start Game
-                    </button>
-                )}
-                {isHost && roomData.status === 'playing' && (
-                    <button 
-                        onClick={returnToLobby}
-                        className="bg-stone-600 hover:bg-stone-700 text-white text-sm font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-sm"
-                    >
-                        <RotateCcw size={16} /> New Round
-                    </button>
-                )}
-            </header>
-
-            {/* Main Content */}
-            <main className="flex-1 max-w-2xl w-full mx-auto p-4 space-y-6 flex flex-col">
-                
-                {roomData.status === 'lobby' ? (
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200 text-center flex-1 flex flex-col justify-center items-center">
-                        <Users size={48} className="text-stone-300 mb-4" />
-                        <h3 className="text-xl font-bold text-stone-800 mb-2">Waiting in Lobby</h3>
-                        <p className="text-stone-500 mb-6">Share the room code <strong className="text-stone-800 bg-stone-100 px-2 py-1 rounded">{roomId}</strong> with your friends.</p>
-                        {isHost ? (
-                            <p className="text-sm text-orange-600 font-medium bg-orange-50 px-4 py-2 rounded-full">You are the host. Start the game when everyone is here.</p>
-                        ) : (
-                            <p className="text-sm text-blue-600 font-medium bg-blue-50 px-4 py-2 rounded-full">Waiting for host to start...</p>
-                        )}
-                    </div>
-                ) : (
-                    <GameplayArea user={user} roomId={roomId} me={me} />
-                )}
-
-                {/* Players List */}
-                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden mt-auto">
-                    <div className="bg-stone-50 px-4 py-3 border-b border-stone-200 flex justify-between items-center">
-                        <h3 className="font-bold text-stone-700">Players</h3>
-                        <span className="text-xs font-semibold bg-stone-200 text-stone-600 px-2 py-1 rounded-full">
-                            {playersList.length} / 4+
-                        </span>
-                    </div>
-                    <ul className="divide-y divide-stone-100">
-                        {playersList.map(player => (
-                            <li key={player.uid} className="px-4 py-3 flex items-center justify-between hover:bg-stone-50 transition-colors">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${player.uid === user.uid ? 'bg-orange-500' : 'bg-stone-400'}`}>
-                                        {player.name.charAt(0).toUpperCase()}
-                                    </div>
-                                    <span className={`font-medium ${player.uid === user.uid ? 'text-orange-700' : 'text-stone-700'}`}>
-                                        {player.name} {player.uid === user.uid && '(You)'}
-                                    </span>
-                                </div>
+                        <div id="chit-card" class="relative group perspective-1000 w-64 h-80 cursor-pointer">
+                            <div class="w-full h-full transition-all duration-700 transform-style-3d shadow-2xl rounded-3xl ${isFlipped ? 'rotate-y-180' : ''}">
                                 
-                                {roomData.status === 'playing' ? (
-                                    player.revealedToAll ? (
-                                        <span className="inline-block bg-green-100 text-green-800 border border-green-200 px-3 py-1 rounded-full text-sm font-bold animate-pulse-once">
-                                            {player.role}
-                                        </span>
-                                    ) : (
-                                        <span className="inline-block bg-stone-100 text-stone-500 border border-stone-200 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1">
-                                            <EyeOff size={14} /> Hidden
-                                        </span>
-                                    )
-                                ) : (
-                                    <span className="text-xs text-stone-400">In Lobby</span>
-                                )}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            </main>
-        </div>
-    );
-}
+                                <!-- Back of Card -->
+                                <div class="absolute inset-0 backface-hidden bg-gradient-to-br from-orange-400 to-red-500 rounded-3xl flex flex-col items-center justify-center text-white border-4 border-white shadow-inner">
+                                    <svg class="w-16 h-16 mb-6 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                                    <span class="font-extrabold text-2xl tracking-widest drop-shadow-md">TAP TO PEEK</span>
+                                </div>
 
-// --- Gameplay Interactions ---
-function GameplayArea({ user, roomId, me }) {
-    const [hasPeeked, setHasPeeked] = useState(false);
-
-    // Reset peek state if a new round starts (role changes)
-    useEffect(() => {
-        setHasPeeked(false);
-    }, [me?.role]);
-
-    const handleRevealToAll = async () => {
-        if (!me) return;
-        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
-        await updateDoc(roomRef, {
-            [`players.${user.uid}.revealedToAll`]: true
-        });
-    };
-
-    if (!me || !me.role) return null;
-
-    return (
-        <div className="flex-1 flex flex-col items-center justify-center py-6">
-            <h3 className="text-lg font-bold text-stone-500 mb-6 uppercase tracking-widest">Your Chit</h3>
-            
-            {/* The Chit / Card */}
-            <div className="relative group perspective-1000 w-64 h-80 cursor-pointer" onClick={() => !me.revealedToAll && setHasPeeked(true)}>
-                <div className={`w-full h-full transition-all duration-500 transform-style-3d shadow-xl rounded-2xl ${hasPeeked || me.revealedToAll ? 'rotate-y-180' : ''}`}>
-                    
-                    {/* Back of Card (Hidden) */}
-                    <div className="absolute inset-0 backface-hidden bg-gradient-to-br from-orange-400 to-red-500 rounded-2xl flex flex-col items-center justify-center text-white border-4 border-white">
-                        <ShieldAlert size={48} className="mb-4 opacity-80" />
-                        <span className="font-bold text-xl tracking-wide">TAP TO PEEK</span>
-                        <span className="text-sm opacity-70 mt-2">Secret Role</span>
-                    </div>
-
-                    {/* Front of Card (Revealed) */}
-                    <div className="absolute inset-0 backface-hidden rotate-y-180 bg-white rounded-2xl flex flex-col items-center justify-center border-4 border-orange-200 text-stone-800 p-6 text-center">
-                        <div className="text-6xl mb-4">
-                            {me.role.includes('👑') ? '👑' : 
-                             me.role.includes('👨‍⚖️') ? '👨‍⚖️' : 
-                             me.role.includes('🦹‍♂️') ? '🦹‍♂️' : 
-                             me.role.includes('👮') ? '👮' : '🧑‍🌾'}
+                                <!-- Front of Card -->
+                                <div class="absolute inset-0 backface-hidden rotate-y-180 bg-white rounded-3xl flex flex-col items-center justify-center border-4 border-orange-200 text-stone-800 p-8 text-center shadow-inner">
+                                    <div class="text-7xl mb-6 drop-shadow-sm">${roleEmoji}</div>
+                                    <h2 class="text-4xl font-black mb-3 text-orange-600 tracking-tight">${roleName}</h2>
+                                    <p class="text-stone-500 text-sm font-bold bg-stone-50 px-3 py-2 rounded-lg border border-stone-100">
+                                        ${me.revealedToAll ? "Everyone can see your role." : "Keep this secret!"}
+                                    </p>
+                                </div>
+                            </div>
                         </div>
-                        <h2 className="text-3xl font-black mb-2 text-orange-600">
-                            {me.role.split(' ')[0]}
-                        </h2>
-                        <p className="text-stone-500 text-sm font-medium">
-                            {me.revealedToAll 
-                                ? "Everyone can see your role." 
-                                : "Keep this secret! Only you can see this."}
-                        </p>
-                    </div>
-                </div>
-            </div>
 
-            {/* Reveal Action Button */}
-            <div className="mt-8 h-16">
-                {(hasPeeked || me.revealedToAll) && !me.revealedToAll && (
-                    <button 
-                        onClick={handleRevealToAll}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105 active:scale-95 animate-fade-in-up"
-                    >
-                        <Eye size={20} /> Reveal to Everyone
-                    </button>
-                )}
-                {me.revealedToAll && (
-                    <div className="text-green-600 font-bold flex items-center gap-2 bg-green-50 px-6 py-3 rounded-full border border-green-200">
-                        <Eye size={20} /> Revealed to Room
+                        <div class="mt-10 h-16 w-full flex justify-center">
+                            ${isFlipped && !me.revealedToAll ? `
+                                <button id="btn-reveal" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-2xl shadow-xl hover:shadow-blue-500/30 flex items-center gap-3 transition-all transform hover:-translate-y-1 active:scale-95 animate-fade-in-up w-full max-w-xs justify-center text-lg">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                    Reveal to Room
+                                </button>
+                            ` : me.revealedToAll ? `
+                                <div class="text-green-700 font-extrabold flex items-center gap-2 bg-green-100 px-8 py-4 rounded-2xl border-2 border-green-200 shadow-sm w-full max-w-xs justify-center text-lg">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                    Revealed
+                                </div>
+                            ` : ''}
+                        </div>
                     </div>
-                )}
-            </div>
+                `;
+
+                // Attach events for dynamic elements
+                const chitCard = document.getElementById('chit-card');
+                if (chitCard && !me.revealedToAll) {
+                    chitCard.addEventListener('click', () => {
+                        hasPeeked = true;
+                        renderRoom();
+                    });
+                }
+
+                const btnReveal = document.getElementById('btn-reveal');
+                if (btnReveal) {
+                    btnReveal.addEventListener('click', revealRole);
+                }
+            }
+
+            // Render Players List
+            el.playersList.innerHTML = players.map(player => {
+                const isMe = player.uid === user.uid;
+                const isRevealed = currentRoomData.status === 'playing' && player.revealedToAll;
+                
+                let statusHtml = '';
+                if (currentRoomData.status === 'playing') {
+                    if (isRevealed) {
+                        statusHtml = `<span class="inline-block bg-green-100 text-green-800 border border-green-200 px-3 py-1.5 rounded-full text-sm font-bold animate-pulse-once shadow-sm">${player.role}</span>`;
+                    } else {
+                        statusHtml = `<span class="inline-block bg-stone-100 text-stone-500 border border-stone-200 px-3 py-1.5 rounded-full text-sm font-bold flex items-center gap-1.5 shadow-sm"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg> Hidden</span>`;
+                    }
+                } else {
+                    statusHtml = `<span class="text-xs font-bold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-full border border-stone-200">In Lobby</span>`;
+                }
+
+                return `
+                    <li class="px-6 py-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
+                        <div class="flex items-center gap-4">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-extrabold text-sm shadow-inner ${isMe ? 'bg-gradient-to-br from-orange-400 to-red-500 ring-2 ring-orange-200' : 'bg-stone-300'}">
+                                ${player.name.charAt(0).toUpperCase()}
+                            </div>
+                            <span class="font-bold text-lg ${isMe ? 'text-orange-700' : 'text-stone-700'}">
+                                ${player.name} ${isMe ? '<span class="text-orange-400 text-sm ml-1">(You)</span>' : ''}
+                            </span>
+                        </div>
+                        ${statusHtml}
+                    </li>
+                `;
+            }).join('');
+        };
+
+        // --- Game Actions ---
+        const startGame = async () => {
+            const uids = Object.keys(currentRoomData.players);
+            let rolesPool = ['Raja 👑', 'Mantri 👨‍⚖️', 'Chor 🦹‍♂️', 'Sipahi 👮'];
             
-            <style dangerouslySetInnerHTML={{__html: `
-                .perspective-1000 { perspective: 1000px; }
-                .transform-style-3d { transform-style: preserve-3d; }
-                .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-                .rotate-y-180 { transform: rotateY(180deg); }
-                @keyframes fadeInUp {
-                    from { opacity: 0; transform: translateY(10px); }
-                    to { opacity: 1; transform: translateY(0); }
+            if (uids.length < 4) {
+                 rolesPool = rolesPool.slice(0, uids.length);
+            } else if (uids.length > 4) {
+                while (rolesPool.length < uids.length) {
+                    rolesPool.push('Praja 🧑‍🌾');
                 }
-                .animate-fade-in-up { animation: fadeInUp 0.4s ease-out forwards; }
-                @keyframes pulseOnce {
-                    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
-                    50% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(74, 222, 128, 0); }
-                    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
-                }
-                .animate-pulse-once { animation: pulseOnce 0.6s ease-out forwards; }
-            `}} />
-        </div>
-    );
-}
+            }
+
+            // Shuffle
+            for (let i = rolesPool.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [rolesPool[i], rolesPool[j]] = [rolesPool[j], rolesPool[i]];
+            }
+
+            const updatedPlayers = { ...currentRoomData.players };
+            uids.forEach((uid, index) => {
+                updatedPlayers[uid].role = rolesPool[index];
+                updatedPlayers[uid].revealedToAll = false;
+            });
+
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
+            await updateDoc(roomRef, {
+                status: 'playing',
+                players: updatedPlayers
+            });
+        };
+
+        const restartGame = async () => {
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
+            await updateDoc(roomRef, { status: 'lobby' });
+        };
+
+        const revealRole = async () => {
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
+            await updateDoc(roomRef, {
+                [`players.${user.uid}.revealedToAll`]: true
+            });
+        };
+
+        const leaveRoom = (msg = '') => {
+            if (unsubscribeRoom) {
+                unsubscribeRoom();
+                unsubscribeRoom = null;
+            }
+            currentRoomId = null;
+            currentRoomData = null;
+            hasPeeked = false;
+            showScreen('home');
+            if (msg) showError(msg);
+        };
+
+        // Bind static UI actions
+        el.btnLeave.addEventListener('click', () => leaveRoom());
+
+    </script>
+</body>
+</html>
