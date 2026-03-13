@@ -1,0 +1,468 @@
+import React, { useState, useEffect } from 'react';
+import { 
+    Eye, 
+    EyeOff, 
+    Users, 
+    Play, 
+    RotateCcw, 
+    LogOut, 
+    Crown, 
+    ShieldAlert, 
+    User, 
+    Swords
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { 
+    getAuth, 
+    signInAnonymously, 
+    signInWithCustomToken, 
+    onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+    getFirestore, 
+    collection, 
+    doc, 
+    setDoc, 
+    getDoc, 
+    updateDoc, 
+    onSnapshot 
+} from 'firebase/firestore';
+
+// --- Firebase Setup ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+export default function App() {
+    const [user, setUser] = useState(null);
+    const [authLoading, setAuthLoading] = useState(true);
+    const [authError, setAuthError] = useState(null);
+
+    // 1. Initialize Authentication (Required before Firestore)
+    useEffect(() => {
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth Error:", err);
+                setAuthError(err.message);
+            } finally {
+                setAuthLoading(false);
+            }
+        };
+
+        initAuth();
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-orange-50 text-orange-800 font-sans">
+                <div className="animate-pulse text-xl font-bold">Loading Game Engine...</div>
+            </div>
+        );
+    }
+
+    if (authError) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-red-50 text-red-800 p-4">
+                <div className="max-w-md w-full bg-white p-6 rounded-xl shadow-lg border border-red-200">
+                    <h2 className="text-xl font-bold mb-2">Authentication Error</h2>
+                    <p className="text-sm">{authError}</p>
+                </div>
+            </div>
+        );
+    }
+
+    return <GameManager user={user} />;
+}
+
+// --- Main Game Manager ---
+function GameManager({ user }) {
+    const [playerName, setPlayerName] = useState('');
+    const [roomCode, setRoomCode] = useState('');
+    const [currentRoom, setCurrentRoom] = useState(null);
+    const [roomData, setRoomData] = useState(null);
+    const [errorMsg, setErrorMsg] = useState('');
+
+    // Listen to Room Data
+    useEffect(() => {
+        if (!user || !currentRoom) return;
+        
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoom);
+        
+        const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+            if (snapshot.exists()) {
+                setRoomData(snapshot.data());
+            } else {
+                setErrorMsg("Room was closed or does not exist.");
+                setCurrentRoom(null);
+            }
+        }, (error) => {
+            console.error("Snapshot error:", error);
+            setErrorMsg("Lost connection to the room.");
+        });
+
+        return () => unsubscribe();
+    }, [user, currentRoom]);
+
+    const handleJoinCreateRoom = async (e) => {
+        e.preventDefault();
+        setErrorMsg('');
+        const code = roomCode.trim().toUpperCase();
+        const name = playerName.trim();
+
+        if (!code || !name) {
+            setErrorMsg("Please enter both Name and Room Code.");
+            return;
+        }
+
+        try {
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', code);
+            const roomSnap = await getDoc(roomRef);
+
+            if (!roomSnap.exists()) {
+                // Create new room
+                await setDoc(roomRef, {
+                    id: code,
+                    host: user.uid,
+                    status: 'lobby',
+                    players: {
+                        [user.uid]: { name: name, role: '', revealedToAll: false }
+                    }
+                });
+            } else {
+                // Join existing room
+                const data = roomSnap.data();
+                if (data.status !== 'lobby') {
+                    setErrorMsg("Game is already in progress. Wait for them to finish the round!");
+                    return;
+                }
+                
+                await updateDoc(roomRef, {
+                    [`players.${user.uid}`]: { name: name, role: '', revealedToAll: false }
+                });
+            }
+            setCurrentRoom(code);
+        } catch (err) {
+            console.error(err);
+            setErrorMsg("Failed to join room. Please try again.");
+        }
+    };
+
+    const leaveRoom = async () => {
+        if (!currentRoom || !user || !roomData) return;
+        // Optional: Remove user from room data to clean up. For simplicity, just unsetting local state.
+        setCurrentRoom(null);
+        setRoomData(null);
+        setRoomCode('');
+    };
+
+    // --- RENDER ---
+    if (!currentRoom || !roomData) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-orange-100 to-yellow-200 flex flex-col items-center justify-center p-4 font-sans">
+                <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden">
+                    <div className="bg-orange-600 p-6 text-center">
+                        <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2">
+                            <Swords size={32} />
+                            Chor Sipahi
+                        </h1>
+                        <p className="text-orange-200 mt-2 text-sm">Raja • Mantri • Chor • Sipahi</p>
+                    </div>
+                    
+                    <div className="p-8">
+                        {errorMsg && (
+                            <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm font-medium">
+                                {errorMsg}
+                            </div>
+                        )}
+                        
+                        <form onSubmit={handleJoinCreateRoom} className="space-y-5">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Your Name</label>
+                                <input 
+                                    type="text" 
+                                    maxLength={15}
+                                    placeholder="e.g. Rahul, Aisha" 
+                                    value={playerName}
+                                    onChange={(e) => setPlayerName(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Room Code</label>
+                                <input 
+                                    type="text" 
+                                    maxLength={8}
+                                    placeholder="e.g. FUN123" 
+                                    value={roomCode}
+                                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl uppercase focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all outline-none"
+                                />
+                                <p className="text-xs text-gray-500 mt-2">Enter any code to create a room or join a friend's room.</p>
+                            </div>
+                            
+                            <button 
+                                type="submit" 
+                                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl transition-colors shadow-md active:scale-95 transform"
+                            >
+                                Join / Create Room
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <RoomView 
+            user={user} 
+            roomId={currentRoom} 
+            roomData={roomData} 
+            onLeave={leaveRoom} 
+        />
+    );
+}
+
+// --- Active Room Component ---
+function RoomView({ user, roomId, roomData, onLeave }) {
+    const isHost = roomData.host === user.uid;
+    const playersList = Object.entries(roomData.players || {}).map(([uid, data]) => ({ uid, ...data }));
+    const me = roomData.players[user.uid];
+
+    const startGame = async () => {
+        const uids = Object.keys(roomData.players);
+        
+        // Define base roles
+        let rolesPool = ['Raja 👑', 'Mantri 👨‍⚖️', 'Chor 🦹‍♂️', 'Sipahi 👮'];
+        
+        // Adjust pool based on number of players
+        if (uids.length < 4) {
+             rolesPool = rolesPool.slice(0, uids.length);
+        } else if (uids.length > 4) {
+            while (rolesPool.length < uids.length) {
+                rolesPool.push('Praja 🧑‍🌾'); // Citizen
+            }
+        }
+
+        // Shuffle roles
+        for (let i = rolesPool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rolesPool[i], rolesPool[j]] = [rolesPool[j], rolesPool[i]];
+        }
+
+        const updatedPlayers = { ...roomData.players };
+        uids.forEach((uid, index) => {
+            updatedPlayers[uid].role = rolesPool[index];
+            updatedPlayers[uid].revealedToAll = false;
+        });
+
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
+        await updateDoc(roomRef, {
+            status: 'playing',
+            players: updatedPlayers
+        });
+    };
+
+    const returnToLobby = async () => {
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
+        await updateDoc(roomRef, {
+            status: 'lobby'
+        });
+    };
+
+    return (
+        <div className="min-h-screen bg-stone-100 flex flex-col font-sans">
+            {/* Header */}
+            <header className="bg-white border-b border-stone-200 px-4 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10">
+                <div className="flex items-center gap-3">
+                    <button onClick={onLeave} className="p-2 text-stone-500 hover:bg-stone-100 rounded-full transition-colors">
+                        <LogOut size={20} />
+                    </button>
+                    <div>
+                        <h2 className="font-bold text-stone-800 leading-tight">Room: {roomId}</h2>
+                        <p className="text-xs text-stone-500">{playersList.length} Player(s)</p>
+                    </div>
+                </div>
+                {isHost && roomData.status === 'lobby' && (
+                    <button 
+                        onClick={startGame}
+                        disabled={playersList.length < 2}
+                        className="bg-green-600 hover:bg-green-700 disabled:bg-stone-300 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-sm"
+                    >
+                        <Play size={16} /> Start Game
+                    </button>
+                )}
+                {isHost && roomData.status === 'playing' && (
+                    <button 
+                        onClick={returnToLobby}
+                        className="bg-stone-600 hover:bg-stone-700 text-white text-sm font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-sm"
+                    >
+                        <RotateCcw size={16} /> New Round
+                    </button>
+                )}
+            </header>
+
+            {/* Main Content */}
+            <main className="flex-1 max-w-2xl w-full mx-auto p-4 space-y-6 flex flex-col">
+                
+                {roomData.status === 'lobby' ? (
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200 text-center flex-1 flex flex-col justify-center items-center">
+                        <Users size={48} className="text-stone-300 mb-4" />
+                        <h3 className="text-xl font-bold text-stone-800 mb-2">Waiting in Lobby</h3>
+                        <p className="text-stone-500 mb-6">Share the room code <strong className="text-stone-800 bg-stone-100 px-2 py-1 rounded">{roomId}</strong> with your friends.</p>
+                        {isHost ? (
+                            <p className="text-sm text-orange-600 font-medium bg-orange-50 px-4 py-2 rounded-full">You are the host. Start the game when everyone is here.</p>
+                        ) : (
+                            <p className="text-sm text-blue-600 font-medium bg-blue-50 px-4 py-2 rounded-full">Waiting for host to start...</p>
+                        )}
+                    </div>
+                ) : (
+                    <GameplayArea user={user} roomId={roomId} me={me} />
+                )}
+
+                {/* Players List */}
+                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden mt-auto">
+                    <div className="bg-stone-50 px-4 py-3 border-b border-stone-200 flex justify-between items-center">
+                        <h3 className="font-bold text-stone-700">Players</h3>
+                        <span className="text-xs font-semibold bg-stone-200 text-stone-600 px-2 py-1 rounded-full">
+                            {playersList.length} / 4+
+                        </span>
+                    </div>
+                    <ul className="divide-y divide-stone-100">
+                        {playersList.map(player => (
+                            <li key={player.uid} className="px-4 py-3 flex items-center justify-between hover:bg-stone-50 transition-colors">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${player.uid === user.uid ? 'bg-orange-500' : 'bg-stone-400'}`}>
+                                        {player.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <span className={`font-medium ${player.uid === user.uid ? 'text-orange-700' : 'text-stone-700'}`}>
+                                        {player.name} {player.uid === user.uid && '(You)'}
+                                    </span>
+                                </div>
+                                
+                                {roomData.status === 'playing' ? (
+                                    player.revealedToAll ? (
+                                        <span className="inline-block bg-green-100 text-green-800 border border-green-200 px-3 py-1 rounded-full text-sm font-bold animate-pulse-once">
+                                            {player.role}
+                                        </span>
+                                    ) : (
+                                        <span className="inline-block bg-stone-100 text-stone-500 border border-stone-200 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1">
+                                            <EyeOff size={14} /> Hidden
+                                        </span>
+                                    )
+                                ) : (
+                                    <span className="text-xs text-stone-400">In Lobby</span>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </main>
+        </div>
+    );
+}
+
+// --- Gameplay Interactions ---
+function GameplayArea({ user, roomId, me }) {
+    const [hasPeeked, setHasPeeked] = useState(false);
+
+    // Reset peek state if a new round starts (role changes)
+    useEffect(() => {
+        setHasPeeked(false);
+    }, [me?.role]);
+
+    const handleRevealToAll = async () => {
+        if (!me) return;
+        const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
+        await updateDoc(roomRef, {
+            [`players.${user.uid}.revealedToAll`]: true
+        });
+    };
+
+    if (!me || !me.role) return null;
+
+    return (
+        <div className="flex-1 flex flex-col items-center justify-center py-6">
+            <h3 className="text-lg font-bold text-stone-500 mb-6 uppercase tracking-widest">Your Chit</h3>
+            
+            {/* The Chit / Card */}
+            <div className="relative group perspective-1000 w-64 h-80 cursor-pointer" onClick={() => !me.revealedToAll && setHasPeeked(true)}>
+                <div className={`w-full h-full transition-all duration-500 transform-style-3d shadow-xl rounded-2xl ${hasPeeked || me.revealedToAll ? 'rotate-y-180' : ''}`}>
+                    
+                    {/* Back of Card (Hidden) */}
+                    <div className="absolute inset-0 backface-hidden bg-gradient-to-br from-orange-400 to-red-500 rounded-2xl flex flex-col items-center justify-center text-white border-4 border-white">
+                        <ShieldAlert size={48} className="mb-4 opacity-80" />
+                        <span className="font-bold text-xl tracking-wide">TAP TO PEEK</span>
+                        <span className="text-sm opacity-70 mt-2">Secret Role</span>
+                    </div>
+
+                    {/* Front of Card (Revealed) */}
+                    <div className="absolute inset-0 backface-hidden rotate-y-180 bg-white rounded-2xl flex flex-col items-center justify-center border-4 border-orange-200 text-stone-800 p-6 text-center">
+                        <div className="text-6xl mb-4">
+                            {me.role.includes('👑') ? '👑' : 
+                             me.role.includes('👨‍⚖️') ? '👨‍⚖️' : 
+                             me.role.includes('🦹‍♂️') ? '🦹‍♂️' : 
+                             me.role.includes('👮') ? '👮' : '🧑‍🌾'}
+                        </div>
+                        <h2 className="text-3xl font-black mb-2 text-orange-600">
+                            {me.role.split(' ')[0]}
+                        </h2>
+                        <p className="text-stone-500 text-sm font-medium">
+                            {me.revealedToAll 
+                                ? "Everyone can see your role." 
+                                : "Keep this secret! Only you can see this."}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Reveal Action Button */}
+            <div className="mt-8 h-16">
+                {(hasPeeked || me.revealedToAll) && !me.revealedToAll && (
+                    <button 
+                        onClick={handleRevealToAll}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full shadow-lg flex items-center gap-2 transition-transform transform hover:scale-105 active:scale-95 animate-fade-in-up"
+                    >
+                        <Eye size={20} /> Reveal to Everyone
+                    </button>
+                )}
+                {me.revealedToAll && (
+                    <div className="text-green-600 font-bold flex items-center gap-2 bg-green-50 px-6 py-3 rounded-full border border-green-200">
+                        <Eye size={20} /> Revealed to Room
+                    </div>
+                )}
+            </div>
+            
+            <style dangerouslySetInnerHTML={{__html: `
+                .perspective-1000 { perspective: 1000px; }
+                .transform-style-3d { transform-style: preserve-3d; }
+                .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+                .rotate-y-180 { transform: rotateY(180deg); }
+                @keyframes fadeInUp {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .animate-fade-in-up { animation: fadeInUp 0.4s ease-out forwards; }
+                @keyframes pulseOnce {
+                    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+                    50% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(74, 222, 128, 0); }
+                    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+                }
+                .animate-pulse-once { animation: pulseOnce 0.6s ease-out forwards; }
+            `}} />
+        </div>
+    );
+}
