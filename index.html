@@ -111,9 +111,9 @@
     </div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { initializeApp as fbInit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth as fbGetAuth, signInAnonymously as fbSignInAnon, signInWithCustomToken as fbSignInToken, onAuthStateChanged as fbOnAuth } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore as fbGetDb, doc as fbDoc, setDoc as fbSetDoc, getDoc as fbGetDoc, updateDoc as fbUpdateDoc, onSnapshot as fbOnSnap } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- DOM Elements ---
         const screens = {
@@ -167,20 +167,68 @@
         // --- Core Application Logic Wrapped in Safety Try-Catch ---
         try {
             // Firebase Configuration Parsing with Fallback
+            let useFirebase = false;
             let configObj = null;
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 configObj = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
+                if (configObj && Object.keys(configObj).length > 0) {
+                    useFirebase = true;
+                }
             }
 
-            if (!configObj || Object.keys(configObj).length === 0) {
-                throw new Error("Missing Firebase Configuration. The multiplayer database cannot connect.");
+            // --- Local Storage Mock for Tab-to-Tab Multiplayer ---
+            // This fallback activates if a database configuration is missing in the environment.
+            let localUid = localStorage.getItem('local_uid');
+            if (!localUid) {
+                localUid = 'user_' + Math.random().toString(36).substr(2, 9);
+                localStorage.setItem('local_uid', localUid);
             }
+            const mockAuth = { currentUser: { uid: localUid } };
 
-            // Initialize Firebase App
-            const app = initializeApp(configObj);
-            const auth = getAuth(app);
-            const db = getFirestore(app);
+            const app = useFirebase ? fbInit(configObj) : {};
+            const auth = useFirebase ? fbGetAuth(app) : mockAuth;
+            const db = useFirebase ? fbGetDb(app) : {};
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+            const signInAnonymously = useFirebase ? fbSignInAnon : async () => {};
+            const signInWithCustomToken = useFirebase ? fbSignInToken : async () => {};
+            const onAuthStateChanged = useFirebase ? fbOnAuth : (authObj, cb) => { cb(mockAuth.currentUser); return ()=>{}; };
+            
+            const doc = useFirebase ? fbDoc : (db, ...parts) => parts.join('_');
+            const setDoc = useFirebase ? fbSetDoc : async (path, data) => {
+                localStorage.setItem(path, JSON.stringify(data));
+                window.dispatchEvent(new StorageEvent('storage', { key: path, newValue: JSON.stringify(data) }));
+            };
+            const getDoc = useFirebase ? fbGetDoc : async (path) => {
+                const d = localStorage.getItem(path);
+                return { exists: () => !!d, data: () => d ? JSON.parse(d) : null };
+            };
+            const updateDoc = useFirebase ? fbUpdateDoc : async (path, data) => {
+                const existing = JSON.parse(localStorage.getItem(path) || '{}');
+                let merged = { ...existing };
+                for (let key in data) {
+                    let parts = key.split('.');
+                    let currentLevel = merged;
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        if (!currentLevel[parts[i]]) currentLevel[parts[i]] = {};
+                        currentLevel = currentLevel[parts[i]];
+                    }
+                    currentLevel[parts[parts.length - 1]] = data[key];
+                }
+                localStorage.setItem(path, JSON.stringify(merged));
+                window.dispatchEvent(new StorageEvent('storage', { key: path, newValue: JSON.stringify(merged) }));
+            };
+            const onSnapshot = useFirebase ? fbOnSnap : (path, onNext) => {
+                const handler = (e) => {
+                    if (e.key === path) {
+                        onNext({ exists: () => !!e.newValue, data: () => e.newValue ? JSON.parse(e.newValue) : null });
+                    }
+                };
+                window.addEventListener('storage', handler);
+                const current = localStorage.getItem(path);
+                onNext({ exists: () => !!current, data: () => current ? JSON.parse(current) : null });
+                return () => window.removeEventListener('storage', handler);
+            };
 
             // --- State ---
             let user = null;
