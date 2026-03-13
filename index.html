@@ -178,10 +178,11 @@
 
             // --- Local Storage Mock for Tab-to-Tab Multiplayer ---
             // This fallback activates if a database configuration is missing in the environment.
-            let localUid = localStorage.getItem('local_uid');
+            // FIX: Using sessionStorage instead of localStorage so each tab generates a unique player UID.
+            let localUid = sessionStorage.getItem('local_uid');
             if (!localUid) {
                 localUid = 'user_' + Math.random().toString(36).substr(2, 9);
-                localStorage.setItem('local_uid', localUid);
+                sessionStorage.setItem('local_uid', localUid);
             }
             const mockAuth = { currentUser: { uid: localUid } };
 
