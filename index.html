@@ -111,9 +111,9 @@
     </div>
 
     <script type="module">
-        import { initializeApp as fbInit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth as fbGetAuth, signInAnonymously as fbSignInAnon, signInWithCustomToken as fbSignInToken, onAuthStateChanged as fbOnAuth } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore as fbGetDb, doc as fbDoc, setDoc as fbSetDoc, getDoc as fbGetDoc, updateDoc as fbUpdateDoc, onSnapshot as fbOnSnap } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- DOM Elements ---
         const screens = {
@@ -156,9 +156,12 @@
             screens.loading.innerHTML = `
                 <div class="bg-white p-8 rounded-3xl shadow-xl border border-red-200 text-center max-w-md mx-auto w-full">
                     <svg class="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                    <h2 class="text-2xl font-black text-stone-800 mb-2">Game Setup Failed</h2>
+                    <h2 class="text-2xl font-black text-stone-800 mb-2">Cloud Connection Required</h2>
                     <p class="text-stone-500 mb-4 font-medium">${msg}</p>
-                    <div class="text-xs text-red-600 font-mono bg-red-50 p-3 rounded-xl overflow-x-auto text-left break-all">${detail}</div>
+                    <div class="text-sm text-stone-700 bg-orange-50 p-4 rounded-xl border border-orange-200 text-left mt-4">
+                        <strong>To play online with friends from anywhere:</strong><br/>
+                        Share the <em>Live Preview Link</em> provided by this chat window. Do not run this as a downloaded HTML file on your computer, as it needs the cloud environment to connect to the multiplayer server.
+                    </div>
                 </div>
             `;
             showScreen('loading');
@@ -166,70 +169,21 @@
 
         // --- Core Application Logic Wrapped in Safety Try-Catch ---
         try {
-            // Firebase Configuration Parsing with Fallback
-            let useFirebase = false;
+            // Firebase Configuration Parsing
             let configObj = null;
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 configObj = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-                if (configObj && Object.keys(configObj).length > 0) {
-                    useFirebase = true;
-                }
             }
 
-            // --- Local Storage Mock for Tab-to-Tab Multiplayer ---
-            // This fallback activates if a database configuration is missing in the environment.
-            // FIX: Using sessionStorage instead of localStorage so each tab generates a unique player UID.
-            let localUid = sessionStorage.getItem('local_uid');
-            if (!localUid) {
-                localUid = 'user_' + Math.random().toString(36).substr(2, 9);
-                sessionStorage.setItem('local_uid', localUid);
+            if (!configObj || Object.keys(configObj).length === 0) {
+                 throw new Error("Missing Cloud Database Configuration.");
             }
-            const mockAuth = { currentUser: { uid: localUid } };
 
-            const app = useFirebase ? fbInit(configObj) : {};
-            const auth = useFirebase ? fbGetAuth(app) : mockAuth;
-            const db = useFirebase ? fbGetDb(app) : {};
+            // Initialize Firebase App for Global Multiplayer
+            const app = initializeApp(configObj);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-            const signInAnonymously = useFirebase ? fbSignInAnon : async () => {};
-            const signInWithCustomToken = useFirebase ? fbSignInToken : async () => {};
-            const onAuthStateChanged = useFirebase ? fbOnAuth : (authObj, cb) => { cb(mockAuth.currentUser); return ()=>{}; };
-            
-            const doc = useFirebase ? fbDoc : (db, ...parts) => parts.join('_');
-            const setDoc = useFirebase ? fbSetDoc : async (path, data) => {
-                localStorage.setItem(path, JSON.stringify(data));
-                window.dispatchEvent(new StorageEvent('storage', { key: path, newValue: JSON.stringify(data) }));
-            };
-            const getDoc = useFirebase ? fbGetDoc : async (path) => {
-                const d = localStorage.getItem(path);
-                return { exists: () => !!d, data: () => d ? JSON.parse(d) : null };
-            };
-            const updateDoc = useFirebase ? fbUpdateDoc : async (path, data) => {
-                const existing = JSON.parse(localStorage.getItem(path) || '{}');
-                let merged = { ...existing };
-                for (let key in data) {
-                    let parts = key.split('.');
-                    let currentLevel = merged;
-                    for (let i = 0; i < parts.length - 1; i++) {
-                        if (!currentLevel[parts[i]]) currentLevel[parts[i]] = {};
-                        currentLevel = currentLevel[parts[i]];
-                    }
-                    currentLevel[parts[parts.length - 1]] = data[key];
-                }
-                localStorage.setItem(path, JSON.stringify(merged));
-                window.dispatchEvent(new StorageEvent('storage', { key: path, newValue: JSON.stringify(merged) }));
-            };
-            const onSnapshot = useFirebase ? fbOnSnap : (path, onNext) => {
-                const handler = (e) => {
-                    if (e.key === path) {
-                        onNext({ exists: () => !!e.newValue, data: () => e.newValue ? JSON.parse(e.newValue) : null });
-                    }
-                };
-                window.addEventListener('storage', handler);
-                const current = localStorage.getItem(path);
-                onNext({ exists: () => !!current, data: () => current ? JSON.parse(current) : null });
-                return () => window.removeEventListener('storage', handler);
-            };
 
             // --- State ---
             let user = null;
@@ -248,8 +202,8 @@
                     }
                 } catch (err) {
                     console.error("Auth Error:", err);
-                    showError("Failed to fully connect to game servers (Multiplayer might be unstable).");
-                    showScreen('home'); // Continue to Home anyway so user isn't stuck
+                    showError("Failed to fully connect to game servers.");
+                    showScreen('home');
                 }
             };
 
@@ -349,6 +303,8 @@
                 const isHost = currentRoomData.host === user.uid;
                 const players = Object.entries(currentRoomData.players || {}).map(([uid, data]) => ({ uid, ...data }));
                 const me = currentRoomData.players[user.uid];
+                const hostPlayer = currentRoomData.players[currentRoomData.host];
+                const hostName = hostPlayer ? hostPlayer.name : 'the Host';
 
                 // Update Header
                 el.headerRoomId.textContent = `Room: ${currentRoomId}`;
@@ -377,10 +333,10 @@
                         <div class="bg-white p-8 rounded-3xl shadow-sm border border-stone-200 text-center flex-1 flex flex-col justify-center items-center">
                             <svg class="w-16 h-16 text-stone-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
                             <h3 class="text-2xl font-extrabold text-stone-800 mb-2">Waiting in Lobby</h3>
-                            <p class="text-stone-500 mb-6 font-medium">Share the room code <strong class="text-stone-800 bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-200">${currentRoomId}</strong> with friends.</p>
+                            <p class="text-stone-500 mb-6 font-medium">Share the room code <strong class="text-stone-800 bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-200">${currentRoomId}</strong> with friends to play globally.</p>
                             ${isHost 
-                                ? '<p class="text-sm text-orange-700 font-bold bg-orange-100 border border-orange-200 px-5 py-2.5 rounded-xl shadow-sm">You are the host. Start when ready!</p>'
-                                : '<p class="text-sm text-blue-700 font-bold bg-blue-100 border border-blue-200 px-5 py-2.5 rounded-xl shadow-sm">Waiting for host to start...</p>'}
+                                ? '<p class="text-sm text-orange-700 font-bold bg-orange-100 border border-orange-200 px-5 py-2.5 rounded-xl shadow-sm flex items-center gap-2"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path></svg> You are the host. Start when ready!</p>'
+                                : '<p class="text-sm text-blue-700 font-bold bg-blue-100 border border-blue-200 px-5 py-2.5 rounded-xl shadow-sm">Waiting for ' + hostName + ' (Host) to start the game...</p>'}
                         </div>
                     `;
                 } else if (currentRoomData.status === 'playing' && me && me.role) {
@@ -446,6 +402,7 @@
                 // Render Players List
                 el.playersList.innerHTML = players.map(player => {
                     const isMe = player.uid === user.uid;
+                    const isRoomHost = player.uid === currentRoomData.host;
                     const isRevealed = currentRoomData.status === 'playing' && player.revealedToAll;
                     
                     let statusHtml = '';
@@ -466,7 +423,9 @@
                                     ${player.name.charAt(0).toUpperCase()}
                                 </div>
                                 <span class="font-bold text-lg ${isMe ? 'text-orange-700' : 'text-stone-700'}">
-                                    ${player.name} ${isMe ? '<span class="text-orange-400 text-sm ml-1">(You)</span>' : ''}
+                                    ${player.name} 
+                                    ${isMe ? '<span class="text-orange-400 text-sm ml-1">(You)</span>' : ''}
+                                    ${isRoomHost ? '<span class="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full ml-2 uppercase tracking-wide border border-amber-200 shadow-sm">Host</span>' : ''}
                                 </span>
                             </div>
                             ${statusHtml}
@@ -536,7 +495,7 @@
 
         } catch (fatalError) {
             console.error("Critical Setup Error:", fatalError);
-            showFatalError("Cannot connect to the game servers. The database configuration is missing or invalid in this environment.", fatalError.message);
+            showFatalError("Cannot connect to the game servers.", fatalError.message);
         }
 
     </script>
