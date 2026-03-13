@@ -26,7 +26,7 @@
 <body class="bg-gradient-to-br from-orange-100 to-yellow-200 min-h-screen font-sans text-stone-800 flex flex-col">
 
     <!-- Loading Screen -->
-    <div id="screen-loading" class="flex-1 flex items-center justify-center">
+    <div id="screen-loading" class="flex-1 flex items-center justify-center p-4">
         <div class="animate-pulse text-2xl font-extrabold text-orange-600 flex items-center gap-3">
             <svg class="w-8 h-8 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
             Loading Game Engine...
@@ -115,20 +115,6 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Firebase Initialization ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-        // --- State ---
-        let user = null;
-        let currentRoomId = null;
-        let currentRoomData = null;
-        let unsubscribeRoom = null;
-        let hasPeeked = false;
-
         // --- DOM Elements ---
         const screens = {
             loading: document.getElementById('screen-loading'),
@@ -153,8 +139,8 @@
 
         // --- Utils ---
         const showScreen = (screenName) => {
-            Object.values(screens).forEach(s => s.classList.add('hidden'));
-            screens[screenName].classList.remove('hidden');
+            Object.values(screens).forEach(s => s?.classList.add('hidden'));
+            if(screens[screenName]) screens[screenName].classList.remove('hidden');
         };
 
         const showError = (msg) => {
@@ -166,296 +152,343 @@
             el.homeError.classList.remove('hidden');
         };
 
-        // --- Auth (Rule 3) ---
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (err) {
-                console.error("Auth Error:", err);
-                showError("Failed to connect to game servers.");
-                showScreen('home');
-            }
+        const showFatalError = (msg, detail) => {
+            screens.loading.innerHTML = `
+                <div class="bg-white p-8 rounded-3xl shadow-xl border border-red-200 text-center max-w-md mx-auto w-full">
+                    <svg class="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    <h2 class="text-2xl font-black text-stone-800 mb-2">Game Setup Failed</h2>
+                    <p class="text-stone-500 mb-4 font-medium">${msg}</p>
+                    <div class="text-xs text-red-600 font-mono bg-red-50 p-3 rounded-xl overflow-x-auto text-left break-all">${detail}</div>
+                </div>
+            `;
+            showScreen('loading');
         };
 
-        onAuthStateChanged(auth, (currentUser) => {
-            user = currentUser;
-            if (user) {
-                if (!currentRoomId) showScreen('home');
-            }
-        });
-
-        initAuth();
-
-        // --- Home Logic ---
-        el.joinForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!user) return;
-            showError('');
-            
-            const name = el.inputName.value.trim();
-            const code = el.inputCode.value.trim().toUpperCase();
-            
-            if (!name || !code) return;
-            
-            el.btnJoin.disabled = true;
-            el.btnJoin.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Joining...';
-
-            try {
-                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', code);
-                const roomSnap = await getDoc(roomRef);
-
-                if (!roomSnap.exists()) {
-                    // Create
-                    await setDoc(roomRef, {
-                        id: code,
-                        host: user.uid,
-                        status: 'lobby',
-                        players: {
-                            [user.uid]: { name, role: '', revealedToAll: false }
-                        }
-                    });
-                } else {
-                    // Join
-                    const data = roomSnap.data();
-                    if (data.status !== 'lobby' && (!data.players[user.uid])) {
-                        throw new Error("Game is already in progress!");
-                    }
-                    await updateDoc(roomRef, {
-                        [`players.${user.uid}`]: { name, role: '', revealedToAll: false }
-                    });
-                }
-                
-                currentRoomId = code;
-                hasPeeked = false; // Reset peek state on join
-                listenToRoom(code);
-                showScreen('room');
-            } catch (err) {
-                showError(err.message || "Failed to join room.");
-            } finally {
-                el.btnJoin.disabled = false;
-                el.btnJoin.innerHTML = '<span>Join / Create Room</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>';
-            }
-        });
-
-        // --- Room Logic ---
-        const listenToRoom = (roomId) => {
-            if (unsubscribeRoom) unsubscribeRoom();
-            
-            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
-            unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
-                if (snapshot.exists()) {
-                    const prevStatus = currentRoomData?.status;
-                    currentRoomData = snapshot.data();
-                    
-                    // Reset peek if round restarted
-                    if (prevStatus === 'playing' && currentRoomData.status === 'lobby') {
-                        hasPeeked = false;
-                    }
-                    
-                    renderRoom();
-                } else {
-                    leaveRoom("Room was closed.");
-                }
-            }, (error) => {
-                console.error("Room listener error", error);
-                leaveRoom("Lost connection to room.");
-            });
-        };
-
-        const renderRoom = () => {
-            if (!currentRoomData || !user) return;
-
-            const isHost = currentRoomData.host === user.uid;
-            const players = Object.entries(currentRoomData.players || {}).map(([uid, data]) => ({ uid, ...data }));
-            const me = currentRoomData.players[user.uid];
-
-            // Update Header
-            el.headerRoomId.textContent = `Room: ${currentRoomId}`;
-            el.headerPlayerCount.textContent = `${players.length} Player(s)`;
-            el.playerCountBadge.textContent = players.length;
-
-            // Render Header Actions
-            el.headerActions.innerHTML = '';
-            if (isHost && currentRoomData.status === 'lobby') {
-                const startBtn = document.createElement('button');
-                startBtn.className = `bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2 px-4 rounded-xl flex items-center gap-2 transition-colors shadow-sm ${players.length < 2 ? 'opacity-50 cursor-not-allowed' : ''}`;
-                startBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 00-1.555-.832z"></path></svg> Start Game`;
-                if (players.length >= 2) startBtn.onclick = startGame;
-                el.headerActions.appendChild(startBtn);
-            } else if (isHost && currentRoomData.status === 'playing') {
-                const restartBtn = document.createElement('button');
-                restartBtn.className = `bg-stone-600 hover:bg-stone-700 text-white text-sm font-bold py-2 px-4 rounded-xl flex items-center gap-2 transition-colors shadow-sm`;
-                restartBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> New Round`;
-                restartBtn.onclick = restartGame;
-                el.headerActions.appendChild(restartBtn);
+        // --- Core Application Logic Wrapped in Safety Try-Catch ---
+        try {
+            // Firebase Configuration Parsing with Fallback
+            let configObj = null;
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                configObj = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
             }
 
-            // Render Dynamic Area
-            if (currentRoomData.status === 'lobby') {
-                el.dynamicArea.innerHTML = `
-                    <div class="bg-white p-8 rounded-3xl shadow-sm border border-stone-200 text-center flex-1 flex flex-col justify-center items-center">
-                        <svg class="w-16 h-16 text-stone-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                        <h3 class="text-2xl font-extrabold text-stone-800 mb-2">Waiting in Lobby</h3>
-                        <p class="text-stone-500 mb-6 font-medium">Share the room code <strong class="text-stone-800 bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-200">${currentRoomId}</strong> with friends.</p>
-                        ${isHost 
-                            ? '<p class="text-sm text-orange-700 font-bold bg-orange-100 border border-orange-200 px-5 py-2.5 rounded-xl shadow-sm">You are the host. Start when ready!</p>'
-                            : '<p class="text-sm text-blue-700 font-bold bg-blue-100 border border-blue-200 px-5 py-2.5 rounded-xl shadow-sm">Waiting for host to start...</p>'}
-                    </div>
-                `;
-            } else if (currentRoomData.status === 'playing' && me && me.role) {
-                const roleEmoji = me.role.includes('👑') ? '👑' : me.role.includes('👨‍⚖️') ? '👨‍⚖️' : me.role.includes('🦹‍♂️') ? '🦹‍♂️' : me.role.includes('👮') ? '👮' : '🧑‍🌾';
-                const roleName = me.role.split(' ')[0];
-                const isFlipped = hasPeeked || me.revealedToAll;
-
-                el.dynamicArea.innerHTML = `
-                    <div class="flex-1 flex flex-col items-center justify-center py-8">
-                        <h3 class="text-sm font-black text-stone-400 mb-8 uppercase tracking-widest bg-stone-200 px-4 py-1.5 rounded-full shadow-inner">Your Chit</h3>
-                        
-                        <div id="chit-card" class="relative group perspective-1000 w-64 h-80 cursor-pointer">
-                            <div class="w-full h-full transition-all duration-700 transform-style-3d shadow-2xl rounded-3xl ${isFlipped ? 'rotate-y-180' : ''}">
-                                
-                                <!-- Back of Card -->
-                                <div class="absolute inset-0 backface-hidden bg-gradient-to-br from-orange-400 to-red-500 rounded-3xl flex flex-col items-center justify-center text-white border-4 border-white shadow-inner">
-                                    <svg class="w-16 h-16 mb-6 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                                    <span class="font-extrabold text-2xl tracking-widest drop-shadow-md">TAP TO PEEK</span>
-                                </div>
-
-                                <!-- Front of Card -->
-                                <div class="absolute inset-0 backface-hidden rotate-y-180 bg-white rounded-3xl flex flex-col items-center justify-center border-4 border-orange-200 text-stone-800 p-8 text-center shadow-inner">
-                                    <div class="text-7xl mb-6 drop-shadow-sm">${roleEmoji}</div>
-                                    <h2 class="text-4xl font-black mb-3 text-orange-600 tracking-tight">${roleName}</h2>
-                                    <p class="text-stone-500 text-sm font-bold bg-stone-50 px-3 py-2 rounded-lg border border-stone-100">
-                                        ${me.revealedToAll ? "Everyone can see your role." : "Keep this secret!"}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="mt-10 h-16 w-full flex justify-center">
-                            ${isFlipped && !me.revealedToAll ? `
-                                <button id="btn-reveal" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-2xl shadow-xl hover:shadow-blue-500/30 flex items-center gap-3 transition-all transform hover:-translate-y-1 active:scale-95 animate-fade-in-up w-full max-w-xs justify-center text-lg">
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                    Reveal to Room
-                                </button>
-                            ` : me.revealedToAll ? `
-                                <div class="text-green-700 font-extrabold flex items-center gap-2 bg-green-100 px-8 py-4 rounded-2xl border-2 border-green-200 shadow-sm w-full max-w-xs justify-center text-lg">
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                    Revealed
-                                </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                `;
-
-                // Attach events for dynamic elements
-                const chitCard = document.getElementById('chit-card');
-                if (chitCard && !me.revealedToAll) {
-                    chitCard.addEventListener('click', () => {
-                        hasPeeked = true;
-                        renderRoom();
-                    });
-                }
-
-                const btnReveal = document.getElementById('btn-reveal');
-                if (btnReveal) {
-                    btnReveal.addEventListener('click', revealRole);
-                }
+            if (!configObj || Object.keys(configObj).length === 0) {
+                throw new Error("Missing Firebase Configuration. The multiplayer database cannot connect.");
             }
 
-            // Render Players List
-            el.playersList.innerHTML = players.map(player => {
-                const isMe = player.uid === user.uid;
-                const isRevealed = currentRoomData.status === 'playing' && player.revealedToAll;
-                
-                let statusHtml = '';
-                if (currentRoomData.status === 'playing') {
-                    if (isRevealed) {
-                        statusHtml = `<span class="inline-block bg-green-100 text-green-800 border border-green-200 px-3 py-1.5 rounded-full text-sm font-bold animate-pulse-once shadow-sm">${player.role}</span>`;
+            // Initialize Firebase App
+            const app = initializeApp(configObj);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+            // --- State ---
+            let user = null;
+            let currentRoomId = null;
+            let currentRoomData = null;
+            let unsubscribeRoom = null;
+            let hasPeeked = false;
+
+            // --- Auth Initialization ---
+            const initAuth = async () => {
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
                     } else {
-                        statusHtml = `<span class="inline-block bg-stone-100 text-stone-500 border border-stone-200 px-3 py-1.5 rounded-full text-sm font-bold flex items-center gap-1.5 shadow-sm"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg> Hidden</span>`;
+                        await signInAnonymously(auth);
                     }
-                } else {
-                    statusHtml = `<span class="text-xs font-bold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-full border border-stone-200">In Lobby</span>`;
+                } catch (err) {
+                    console.error("Auth Error:", err);
+                    showError("Failed to fully connect to game servers (Multiplayer might be unstable).");
+                    showScreen('home'); // Continue to Home anyway so user isn't stuck
+                }
+            };
+
+            // Monitor Authentication State
+            onAuthStateChanged(auth, (currentUser) => {
+                user = currentUser;
+                if (user && !currentRoomId) {
+                    showScreen('home');
+                }
+            });
+
+            // Start authentication
+            initAuth();
+
+            // --- Home Logic ---
+            el.joinForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!user) {
+                    showError("Please wait, connecting to server...");
+                    return;
+                }
+                showError('');
+                
+                const name = el.inputName.value.trim();
+                const code = el.inputCode.value.trim().toUpperCase();
+                
+                if (!name || !code) return;
+                
+                el.btnJoin.disabled = true;
+                el.btnJoin.innerHTML = '<svg class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Joining...';
+
+                try {
+                    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', code);
+                    const roomSnap = await getDoc(roomRef);
+
+                    if (!roomSnap.exists()) {
+                        // Create
+                        await setDoc(roomRef, {
+                            id: code,
+                            host: user.uid,
+                            status: 'lobby',
+                            players: {
+                                [user.uid]: { name, role: '', revealedToAll: false }
+                            }
+                        });
+                    } else {
+                        // Join
+                        const data = roomSnap.data();
+                        if (data.status !== 'lobby' && (!data.players[user.uid])) {
+                            throw new Error("Game is already in progress!");
+                        }
+                        await updateDoc(roomRef, {
+                            [`players.${user.uid}`]: { name, role: '', revealedToAll: false }
+                        });
+                    }
+                    
+                    currentRoomId = code;
+                    hasPeeked = false; // Reset peek state on join
+                    listenToRoom(code);
+                    showScreen('room');
+                } catch (err) {
+                    showError(err.message || "Failed to join room.");
+                } finally {
+                    el.btnJoin.disabled = false;
+                    el.btnJoin.innerHTML = '<span>Join / Create Room</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>';
+                }
+            });
+
+            // --- Room Logic ---
+            const listenToRoom = (roomId) => {
+                if (unsubscribeRoom) unsubscribeRoom();
+                
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', roomId);
+                unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
+                    if (snapshot.exists()) {
+                        const prevStatus = currentRoomData?.status;
+                        currentRoomData = snapshot.data();
+                        
+                        // Reset peek if round restarted
+                        if (prevStatus === 'playing' && currentRoomData.status === 'lobby') {
+                            hasPeeked = false;
+                        }
+                        
+                        renderRoom();
+                    } else {
+                        leaveRoom("Room was closed.");
+                    }
+                }, (error) => {
+                    console.error("Room listener error", error);
+                    leaveRoom("Lost connection to room.");
+                });
+            };
+
+            const renderRoom = () => {
+                if (!currentRoomData || !user) return;
+
+                const isHost = currentRoomData.host === user.uid;
+                const players = Object.entries(currentRoomData.players || {}).map(([uid, data]) => ({ uid, ...data }));
+                const me = currentRoomData.players[user.uid];
+
+                // Update Header
+                el.headerRoomId.textContent = `Room: ${currentRoomId}`;
+                el.headerPlayerCount.textContent = `${players.length} Player(s)`;
+                el.playerCountBadge.textContent = players.length;
+
+                // Render Header Actions
+                el.headerActions.innerHTML = '';
+                if (isHost && currentRoomData.status === 'lobby') {
+                    const startBtn = document.createElement('button');
+                    startBtn.className = `bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2 px-4 rounded-xl flex items-center gap-2 transition-colors shadow-sm ${players.length < 2 ? 'opacity-50 cursor-not-allowed' : ''}`;
+                    startBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 00-1.555-.832z"></path></svg> Start Game`;
+                    if (players.length >= 2) startBtn.onclick = startGame;
+                    el.headerActions.appendChild(startBtn);
+                } else if (isHost && currentRoomData.status === 'playing') {
+                    const restartBtn = document.createElement('button');
+                    restartBtn.className = `bg-stone-600 hover:bg-stone-700 text-white text-sm font-bold py-2 px-4 rounded-xl flex items-center gap-2 transition-colors shadow-sm`;
+                    restartBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> New Round`;
+                    restartBtn.onclick = restartGame;
+                    el.headerActions.appendChild(restartBtn);
                 }
 
-                return `
-                    <li class="px-6 py-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
-                        <div class="flex items-center gap-4">
-                            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-extrabold text-sm shadow-inner ${isMe ? 'bg-gradient-to-br from-orange-400 to-red-500 ring-2 ring-orange-200' : 'bg-stone-300'}">
-                                ${player.name.charAt(0).toUpperCase()}
-                            </div>
-                            <span class="font-bold text-lg ${isMe ? 'text-orange-700' : 'text-stone-700'}">
-                                ${player.name} ${isMe ? '<span class="text-orange-400 text-sm ml-1">(You)</span>' : ''}
-                            </span>
+                // Render Dynamic Area
+                if (currentRoomData.status === 'lobby') {
+                    el.dynamicArea.innerHTML = `
+                        <div class="bg-white p-8 rounded-3xl shadow-sm border border-stone-200 text-center flex-1 flex flex-col justify-center items-center">
+                            <svg class="w-16 h-16 text-stone-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                            <h3 class="text-2xl font-extrabold text-stone-800 mb-2">Waiting in Lobby</h3>
+                            <p class="text-stone-500 mb-6 font-medium">Share the room code <strong class="text-stone-800 bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-200">${currentRoomId}</strong> with friends.</p>
+                            ${isHost 
+                                ? '<p class="text-sm text-orange-700 font-bold bg-orange-100 border border-orange-200 px-5 py-2.5 rounded-xl shadow-sm">You are the host. Start when ready!</p>'
+                                : '<p class="text-sm text-blue-700 font-bold bg-blue-100 border border-blue-200 px-5 py-2.5 rounded-xl shadow-sm">Waiting for host to start...</p>'}
                         </div>
-                        ${statusHtml}
-                    </li>
-                `;
-            }).join('');
-        };
+                    `;
+                } else if (currentRoomData.status === 'playing' && me && me.role) {
+                    const roleEmoji = me.role.includes('👑') ? '👑' : me.role.includes('👨‍⚖️') ? '👨‍⚖️' : me.role.includes('🦹‍♂️') ? '🦹‍♂️' : me.role.includes('👮') ? '👮' : '🧑‍🌾';
+                    const roleName = me.role.split(' ')[0];
+                    const isFlipped = hasPeeked || me.revealedToAll;
 
-        // --- Game Actions ---
-        const startGame = async () => {
-            const uids = Object.keys(currentRoomData.players);
-            let rolesPool = ['Raja 👑', 'Mantri 👨‍⚖️', 'Chor 🦹‍♂️', 'Sipahi 👮'];
-            
-            if (uids.length < 4) {
-                 rolesPool = rolesPool.slice(0, uids.length);
-            } else if (uids.length > 4) {
-                while (rolesPool.length < uids.length) {
-                    rolesPool.push('Praja 🧑‍🌾');
+                    el.dynamicArea.innerHTML = `
+                        <div class="flex-1 flex flex-col items-center justify-center py-8">
+                            <h3 class="text-sm font-black text-stone-400 mb-8 uppercase tracking-widest bg-stone-200 px-4 py-1.5 rounded-full shadow-inner">Your Chit</h3>
+                            
+                            <div id="chit-card" class="relative group perspective-1000 w-64 h-80 cursor-pointer">
+                                <div class="w-full h-full transition-all duration-700 transform-style-3d shadow-2xl rounded-3xl ${isFlipped ? 'rotate-y-180' : ''}">
+                                    
+                                    <!-- Back of Card -->
+                                    <div class="absolute inset-0 backface-hidden bg-gradient-to-br from-orange-400 to-red-500 rounded-3xl flex flex-col items-center justify-center text-white border-4 border-white shadow-inner">
+                                        <svg class="w-16 h-16 mb-6 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                                        <span class="font-extrabold text-2xl tracking-widest drop-shadow-md">TAP TO PEEK</span>
+                                    </div>
+
+                                    <!-- Front of Card -->
+                                    <div class="absolute inset-0 backface-hidden rotate-y-180 bg-white rounded-3xl flex flex-col items-center justify-center border-4 border-orange-200 text-stone-800 p-8 text-center shadow-inner">
+                                        <div class="text-7xl mb-6 drop-shadow-sm">${roleEmoji}</div>
+                                        <h2 class="text-4xl font-black mb-3 text-orange-600 tracking-tight">${roleName}</h2>
+                                        <p class="text-stone-500 text-sm font-bold bg-stone-50 px-3 py-2 rounded-lg border border-stone-100">
+                                            ${me.revealedToAll ? "Everyone can see your role." : "Keep this secret!"}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-10 h-16 w-full flex justify-center">
+                                ${isFlipped && !me.revealedToAll ? `
+                                    <button id="btn-reveal" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-2xl shadow-xl hover:shadow-blue-500/30 flex items-center gap-3 transition-all transform hover:-translate-y-1 active:scale-95 animate-fade-in-up w-full max-w-xs justify-center text-lg">
+                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                        Reveal to Room
+                                    </button>
+                                ` : me.revealedToAll ? `
+                                    <div class="text-green-700 font-extrabold flex items-center gap-2 bg-green-100 px-8 py-4 rounded-2xl border-2 border-green-200 shadow-sm w-full max-w-xs justify-center text-lg">
+                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                        Revealed
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+
+                    // Attach events for dynamic elements
+                    const chitCard = document.getElementById('chit-card');
+                    if (chitCard && !me.revealedToAll) {
+                        chitCard.addEventListener('click', () => {
+                            hasPeeked = true;
+                            renderRoom();
+                        });
+                    }
+
+                    const btnReveal = document.getElementById('btn-reveal');
+                    if (btnReveal) {
+                        btnReveal.addEventListener('click', revealRole);
+                    }
                 }
-            }
 
-            // Shuffle
-            for (let i = rolesPool.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [rolesPool[i], rolesPool[j]] = [rolesPool[j], rolesPool[i]];
-            }
+                // Render Players List
+                el.playersList.innerHTML = players.map(player => {
+                    const isMe = player.uid === user.uid;
+                    const isRevealed = currentRoomData.status === 'playing' && player.revealedToAll;
+                    
+                    let statusHtml = '';
+                    if (currentRoomData.status === 'playing') {
+                        if (isRevealed) {
+                            statusHtml = `<span class="inline-block bg-green-100 text-green-800 border border-green-200 px-3 py-1.5 rounded-full text-sm font-bold animate-pulse-once shadow-sm">${player.role}</span>`;
+                        } else {
+                            statusHtml = `<span class="inline-block bg-stone-100 text-stone-500 border border-stone-200 px-3 py-1.5 rounded-full text-sm font-bold flex items-center gap-1.5 shadow-sm"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg> Hidden</span>`;
+                        }
+                    } else {
+                        statusHtml = `<span class="text-xs font-bold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-full border border-stone-200">In Lobby</span>`;
+                    }
 
-            const updatedPlayers = { ...currentRoomData.players };
-            uids.forEach((uid, index) => {
-                updatedPlayers[uid].role = rolesPool[index];
-                updatedPlayers[uid].revealedToAll = false;
-            });
+                    return `
+                        <li class="px-6 py-4 flex items-center justify-between hover:bg-stone-50 transition-colors">
+                            <div class="flex items-center gap-4">
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-extrabold text-sm shadow-inner ${isMe ? 'bg-gradient-to-br from-orange-400 to-red-500 ring-2 ring-orange-200' : 'bg-stone-300'}">
+                                    ${player.name.charAt(0).toUpperCase()}
+                                </div>
+                                <span class="font-bold text-lg ${isMe ? 'text-orange-700' : 'text-stone-700'}">
+                                    ${player.name} ${isMe ? '<span class="text-orange-400 text-sm ml-1">(You)</span>' : ''}
+                                </span>
+                            </div>
+                            ${statusHtml}
+                        </li>
+                    `;
+                }).join('');
+            };
 
-            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
-            await updateDoc(roomRef, {
-                status: 'playing',
-                players: updatedPlayers
-            });
-        };
+            // --- Game Actions ---
+            const startGame = async () => {
+                const uids = Object.keys(currentRoomData.players);
+                let rolesPool = ['Raja 👑', 'Mantri 👨‍⚖️', 'Chor 🦹‍♂️', 'Sipahi 👮'];
+                
+                if (uids.length < 4) {
+                     rolesPool = rolesPool.slice(0, uids.length);
+                } else if (uids.length > 4) {
+                    while (rolesPool.length < uids.length) {
+                        rolesPool.push('Praja 🧑‍🌾');
+                    }
+                }
 
-        const restartGame = async () => {
-            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
-            await updateDoc(roomRef, { status: 'lobby' });
-        };
+                // Shuffle
+                for (let i = rolesPool.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [rolesPool[i], rolesPool[j]] = [rolesPool[j], rolesPool[i]];
+                }
 
-        const revealRole = async () => {
-            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
-            await updateDoc(roomRef, {
-                [`players.${user.uid}.revealedToAll`]: true
-            });
-        };
+                const updatedPlayers = { ...currentRoomData.players };
+                uids.forEach((uid, index) => {
+                    updatedPlayers[uid].role = rolesPool[index];
+                    updatedPlayers[uid].revealedToAll = false;
+                });
 
-        const leaveRoom = (msg = '') => {
-            if (unsubscribeRoom) {
-                unsubscribeRoom();
-                unsubscribeRoom = null;
-            }
-            currentRoomId = null;
-            currentRoomData = null;
-            hasPeeked = false;
-            showScreen('home');
-            if (msg) showError(msg);
-        };
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
+                await updateDoc(roomRef, {
+                    status: 'playing',
+                    players: updatedPlayers
+                });
+            };
 
-        // Bind static UI actions
-        el.btnLeave.addEventListener('click', () => leaveRoom());
+            const restartGame = async () => {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
+                await updateDoc(roomRef, { status: 'lobby' });
+            };
+
+            const revealRole = async () => {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rmcs_rooms', currentRoomId);
+                await updateDoc(roomRef, {
+                    [`players.${user.uid}.revealedToAll`]: true
+                });
+            };
+
+            const leaveRoom = (msg = '') => {
+                if (unsubscribeRoom) {
+                    unsubscribeRoom();
+                    unsubscribeRoom = null;
+                }
+                currentRoomId = null;
+                currentRoomData = null;
+                hasPeeked = false;
+                showScreen('home');
+                if (msg) showError(msg);
+            };
+
+            // Bind static UI actions
+            el.btnLeave.addEventListener('click', () => leaveRoom());
+
+        } catch (fatalError) {
+            console.error("Critical Setup Error:", fatalError);
+            showFatalError("Cannot connect to the game servers. The database configuration is missing or invalid in this environment.", fatalError.message);
+        }
 
     </script>
 </body>
